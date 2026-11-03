@@ -10,7 +10,6 @@ import type { StoredAnswer } from "@/lib/answers";
 import { renderAnswerValue } from "@/lib/answers";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
 import {
   Card,
   CardContent,
@@ -166,7 +165,7 @@ export default async function PatientDetailPage({
             {history.length} resposta(s) registrada(s).
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-6">
+        <CardContent className="space-y-4">
           {history.length === 0 ? (
             <p className="py-6 text-center text-muted-foreground">
               Este paciente ainda não respondeu nenhuma pesquisa.
@@ -174,28 +173,41 @@ export default async function PatientDetailPage({
           ) : (
             history.map((r, idx) => {
               const answers = (r.answers as unknown as StoredAnswer[]) ?? [];
+              const responseNumber = history.length - idx;
               return (
-                <div key={r.id} className="space-y-3">
-                  {idx > 0 && <Separator />}
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <span className="font-medium text-foreground">
-                      {formatDateTimeBR(r.submittedAt)}
-                    </span>
-                  </div>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    {answers.map((a, i) => (
-                      <div
-                        key={i}
-                        className="rounded-lg border bg-muted/30 p-3"
-                      >
-                        <p className="text-xs font-medium text-muted-foreground">
-                          {a.label}
+                <Card key={r.id} className="overflow-hidden shadow-sm">
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/40 px-4 py-3">
+                    <div className="flex items-center gap-3">
+                      <span className="flex size-7 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
+                        {responseNumber}
+                      </span>
+                      <div>
+                        <h3 className="text-sm font-semibold">
+                          Resposta {responseNumber}
+                        </h3>
+                        <p className="text-xs text-muted-foreground">
+                          Enviada em {formatDateTimeBR(r.submittedAt)}
                         </p>
-                        <p className="text-sm">{renderAnswerValue(a)}</p>
                       </div>
-                    ))}
+                    </div>
+                    {idx === 0 && <Badge variant="secondary">Mais recente</Badge>}
                   </div>
-                </div>
+                  <CardContent className="p-4">
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      {answers.map((a, i) => (
+                        <div
+                          key={i}
+                          className="rounded-lg border bg-muted/30 p-3"
+                        >
+                          <p className="text-xs font-medium text-muted-foreground">
+                            {a.label}
+                          </p>
+                          <p className="text-sm">{renderAnswerValue(a)}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
               );
             })
           )}

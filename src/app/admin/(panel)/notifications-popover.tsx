@@ -1,7 +1,7 @@
 "use client";
 
-import Link from "next/link";
 import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { Bell } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -11,7 +11,10 @@ import {
   PopoverContent,
 } from "@/components/ui/popover";
 import { formatDateTimeBR } from "@/lib/dates";
-import { clearNotificationsAction } from "../actions";
+import {
+  clearNotificationsAction,
+  markNotificationSeenAction,
+} from "../actions";
 
 export interface NotificationItem {
   id: string;
@@ -29,6 +32,16 @@ export function NotificationsPopover({
 }) {
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
+  const router = useRouter();
+
+  function openNotification(responseId: string, patientId: string) {
+    setOpen(false);
+    startTransition(async () => {
+      await markNotificationSeenAction(responseId);
+      router.push(`/admin/patients/${patientId}`);
+      router.refresh();
+    });
+  }
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -69,17 +82,18 @@ export function NotificationsPopover({
             </p>
           ) : (
             items.map((item) => (
-              <Link
+              <button
                 key={item.id}
-                href={`/admin/patients/${item.patientId}`}
-                onClick={() => setOpen(false)}
-                className="block border-b px-4 py-3 text-sm last:border-b-0 hover:bg-muted/50"
+                type="button"
+                disabled={pending}
+                onClick={() => openNotification(item.id, item.patientId)}
+                className="block w-full border-b px-4 py-3 text-left text-sm last:border-b-0 hover:bg-muted/50 disabled:cursor-wait"
               >
                 <p className="font-medium">{item.patientName}</p>
                 <p className="text-xs text-muted-foreground">
                   respondeu a pesquisa · {formatDateTimeBR(item.submittedAt)}
                 </p>
-              </Link>
+              </button>
             ))
           )}
         </div>
