@@ -35,6 +35,10 @@ export const patients = pgTable("patients", {
   cpf: text("cpf").unique(), // opcional — pode ser preenchido depois
   planStartDate: date("plan_start_date").notNull(),
   planEndDate: date("plan_end_date").notNull(),
+  // Campos administrativos importados da base de acompanhamento. Ainda não
+  // são exibidos na UI, mas ficam disponíveis para uma futura evolução.
+  planName: text("plan_name"),
+  planStatus: text("plan_status"),
   phone: text("phone"), // E.164, ex: +5511999999999 — opcional por hora (campo removido do cadastro)
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()

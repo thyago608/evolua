@@ -1,7 +1,8 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { createSession, verifyCredentials } from "@/lib/auth";
+import { createSession } from "@/lib/auth";
+import { verifyCredentials } from "@/lib/auth-credentials";
 
 export interface LoginState {
   error?: string;

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { desc } from "drizzle-orm";
+import { count, desc } from "drizzle-orm";
 import { db } from "@/db";
 import { patients, invites, responses, forms } from "@/db/schema";
 import { eq } from "drizzle-orm";
@@ -24,8 +24,10 @@ import {
 } from "@/components/ui/table";
 import { UserPlus, AlertTriangle } from "lucide-react";
 import { PatientLinkDialog } from "./patients/patient-link-dialog";
+import { DeletePatientDialog } from "./patients/delete-patient-dialog";
 
 export const dynamic = "force-dynamic";
+const PATIENTS_PER_PAGE = 10;
 
 type PatientRow = {
   id: string;
@@ -41,16 +43,26 @@ type PatientRow = {
   surveyUrl: string | null;
 };
 
-async function getDashboardData() {
+async function getDashboardData(requestedPage: number) {
   const now = new Date();
 
-  const [allPatients, allInvites, allResponses, activeForm] =
+  const [patientCountResult, allInvites, allResponses, activeForm] =
     await Promise.all([
-      db.select().from(patients).orderBy(desc(patients.createdAt)),
+      db.select({ total: count() }).from(patients),
       db.select().from(invites).orderBy(desc(invites.createdAt)),
       db.select().from(responses),
       db.select().from(forms).where(eq(forms.isActive, true)).limit(1),
     ]);
+
+  const totalPatients = patientCountResult[0]?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(totalPatients / PATIENTS_PER_PAGE));
+  const currentPage = Math.min(Math.max(requestedPage, 1), totalPages);
+  const allPatients = await db
+    .select()
+    .from(patients)
+    .orderBy(desc(patients.createdAt))
+    .limit(PATIENTS_PER_PAGE)
+    .offset((currentPage - 1) * PATIENTS_PER_PAGE);
 
   const latestInviteByPatient = new Map<string, (typeof allInvites)[number]>();
   for (const inv of allInvites) {
@@ -101,6 +113,9 @@ async function getDashboardData() {
 
   return {
     rows,
+    totalPatients,
+    totalPages,
+    currentPage,
     hasActiveForm: activeForm.length > 0,
     totalUnseen: allResponses.filter((r) => !r.seen).length,
     needsResendCount: rows.filter((r) => r.needsResend).length,
@@ -125,9 +140,24 @@ function StatusBadge({ row }: { row: PatientRow }) {
   }
 }
 
-export default async function DashboardPage() {
-  const { rows, hasActiveForm, totalUnseen, needsResendCount } =
-    await getDashboardData();
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ page?: string | string[] }>;
+}) {
+  const params = await searchParams;
+  const rawPage = Array.isArray(params.page) ? params.page[0] : params.page;
+  const parsedPage = Number.parseInt(rawPage ?? "1", 10);
+  const requestedPage = Number.isFinite(parsedPage) && parsedPage > 0 ? parsedPage : 1;
+  const {
+    rows,
+    totalPatients,
+    totalPages,
+    currentPage,
+    hasActiveForm,
+    totalUnseen,
+    needsResendCount,
+  } = await getDashboardData(requestedPage);
 
   return (
     <div className="space-y-6">
@@ -135,7 +165,7 @@ export default async function DashboardPage() {
         <div>
           <h1 className="text-2xl font-semibold">Painel</h1>
           <p className="text-muted-foreground">
-            {rows.length} paciente(s) cadastrado(s).
+            {totalPatients} paciente(s) cadastrado(s).
           </p>
         </div>
         <Button asChild>
@@ -165,7 +195,7 @@ export default async function DashboardPage() {
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Pacientes</CardDescription>
-            <CardTitle className="text-3xl">{rows.length}</CardTitle>
+            <CardTitle className="text-3xl">{totalPatients}</CardTitle>
           </CardHeader>
         </Card>
         <Card>
@@ -226,13 +256,19 @@ export default async function DashboardPage() {
                       )}
                     </TableCell>
                     <TableCell className="text-right">
-                      <PatientLinkDialog
-                        patientId={row.id}
-                        patientName={row.name}
-                        activeInvite={row.activeInvite}
-                        lastInviteCompleted={row.latestInviteStatus === "completed"}
-                        surveyUrl={row.surveyUrl}
-                      />
+                      <div className="flex items-center justify-end gap-1">
+                        <PatientLinkDialog
+                          patientId={row.id}
+                          patientName={row.name}
+                          activeInvite={row.activeInvite}
+                          lastInviteCompleted={row.latestInviteStatus === "completed"}
+                          surveyUrl={row.surveyUrl}
+                        />
+                        <DeletePatientDialog
+                          patientId={row.id}
+                          patientName={row.name}
+                        />
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -240,6 +276,46 @@ export default async function DashboardPage() {
             </Table>
           )}
         </CardContent>
+        {totalPatients > PATIENTS_PER_PAGE && (
+          <div className="flex flex-col gap-3 border-t px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-muted-foreground">
+              Página {currentPage} de {totalPages}
+            </p>
+            <div className="flex items-center gap-1">
+              {currentPage > 1 ? (
+                <Button asChild variant="outline" size="sm">
+                  <Link href={`/admin?page=${currentPage - 1}`}>Anterior</Link>
+                </Button>
+              ) : (
+                <Button variant="outline" size="sm" disabled>
+                  Anterior
+                </Button>
+              )}
+              {Array.from({ length: totalPages }, (_, index) => index + 1).map(
+                (page) => (
+                  <Button
+                    key={page}
+                    asChild={page !== currentPage}
+                    variant={page === currentPage ? "default" : "outline"}
+                    size="sm"
+                    disabled={page === currentPage}
+                  >
+                    {page === currentPage ? <span>{page}</span> : <Link href={`/admin?page=${page}`}>{page}</Link>}
+                  </Button>
+                )
+              )}
+              {currentPage < totalPages ? (
+                <Button asChild variant="outline" size="sm">
+                  <Link href={`/admin?page=${currentPage + 1}`}>Próxima</Link>
+                </Button>
+              ) : (
+                <Button variant="outline" size="sm" disabled>
+                  Próxima
+                </Button>
+              )}
+            </div>
+          </div>
+        )}
       </Card>
     </div>
   );
