@@ -1,10 +1,13 @@
 import Link from "next/link";
+import { cookies } from "next/headers";
 import { desc, eq } from "drizzle-orm";
-import { Users, ClipboardList, LogOut, Activity } from "lucide-react";
+import { LogOut } from "lucide-react";
 import { db } from "@/db";
 import { responses, patients } from "@/db/schema";
 import { logoutAction } from "../actions";
 import { Button } from "@/components/ui/button";
+import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
+import { AppSidebar } from "./app-sidebar";
 import {
   NotificationsPopover,
   type NotificationItem,
@@ -42,48 +45,31 @@ export default async function PanelLayout({
   children: React.ReactNode;
 }) {
   const { items, totalUnseen } = await getNotifications();
-
-  const navItems = [
-    { href: "/admin", label: "Painel", icon: Activity },
-    { href: "/admin/patients/new", label: "Novo paciente", icon: Users },
-    { href: "/admin/forms", label: "Formulários", icon: ClipboardList },
-  ];
+  const sidebarOpen = (await cookies()).get("sidebar_state")?.value !== "false";
 
   return (
-    <div className="min-h-screen bg-muted/30">
-      <header className="border-b bg-background">
-        <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-4">
-          <div className="flex items-center gap-6">
-            <Link href="/admin" className="font-semibold">
+    <SidebarProvider defaultOpen={sidebarOpen}>
+      <AppSidebar />
+      <SidebarInset>
+        <header className="flex h-14 shrink-0 items-center justify-between border-b px-4">
+          <div className="flex items-center gap-2">
+            <SidebarTrigger />
+            <Link href="/admin" className="font-semibold md:hidden">
               Evolua.
             </Link>
-            <nav className="hidden items-center gap-1 md:flex">
-              {navItems.map((item) => (
-                <Button
-                  key={item.href}
-                  asChild
-                  variant="ghost"
-                  size="sm"
-                  className="gap-2"
-                >
-                  <Link href={item.href}>
-                    <item.icon className="h-4 w-4" />
-                    {item.label}
-                  </Link>
-                </Button>
-              ))}
-              <NotificationsPopover items={items} totalUnseen={totalUnseen} />
-            </nav>
           </div>
-          <form action={logoutAction}>
-            <Button variant="ghost" size="sm" className="gap-2" type="submit">
-              <LogOut className="h-4 w-4" />
-              Sair
-            </Button>
-          </form>
-        </div>
-      </header>
-      <main className="mx-auto max-w-6xl px-4 py-8">{children}</main>
-    </div>
+          <div className="flex items-center gap-1">
+            <NotificationsPopover items={items} totalUnseen={totalUnseen} />
+            <form action={logoutAction}>
+              <Button variant="ghost" size="sm" className="gap-2" type="submit">
+                <LogOut className="h-4 w-4" />
+                Sair
+              </Button>
+            </form>
+          </div>
+        </header>
+        <main className="mx-auto w-full max-w-6xl px-4 py-8">{children}</main>
+      </SidebarInset>
+    </SidebarProvider>
   );
 }

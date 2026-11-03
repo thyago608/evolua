@@ -2,7 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { responses } from "@/db/schema";
 import { destroySession } from "@/lib/auth";
@@ -18,5 +18,15 @@ export async function clearNotificationsAction() {
     .update(responses)
     .set({ seen: true })
     .where(eq(responses.seen, false));
+  revalidatePath("/admin", "layout");
+}
+
+/** Marca uma resposta específica como vista ao abrir sua notificação. */
+export async function markNotificationSeenAction(responseId: string) {
+  await db
+    .update(responses)
+    .set({ seen: true })
+    .where(and(eq(responses.id, responseId), eq(responses.seen, false)));
+
   revalidatePath("/admin", "layout");
 }
