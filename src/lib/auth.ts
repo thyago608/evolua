@@ -1,6 +1,5 @@
 import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
-import bcrypt from "bcryptjs";
 
 export const SESSION_COOKIE = "session";
 const SESSION_MAX_AGE = 60 * 60 * 8; // 8 horas
@@ -38,20 +37,6 @@ export async function verifySessionToken(
   } catch {
     return null;
   }
-}
-
-/** Valida usuário/senha contra as credenciais do admin (env). */
-export async function verifyCredentials(
-  user: string,
-  password: string
-): Promise<boolean> {
-  const adminUser = process.env.ADMIN_USER;
-  const adminHash = process.env.ADMIN_PASSWORD_HASH;
-  if (!adminUser || !adminHash) {
-    throw new Error("Credenciais do admin não configuradas no servidor.");
-  }
-  if (user !== adminUser) return false;
-  return bcrypt.compare(password, adminHash);
 }
 
 /** Cria a sessão gravando o cookie httpOnly. */

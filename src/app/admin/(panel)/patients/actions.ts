@@ -7,6 +7,7 @@ import { db } from "@/db";
 import { patients } from "@/db/schema";
 import { patientSchema, patientDetailsSchema, onlyDigits } from "@/lib/validation";
 import { createInviteForPatient, markInviteSent } from "@/lib/invites";
+import { getSession } from "@/lib/auth";
 
 export interface PatientFormState {
   error?: string;
@@ -72,6 +73,31 @@ export interface PatientDetailsState {
   error?: string;
   fieldErrors?: Record<string, string>;
   savedAt?: number;
+}
+
+export interface DeletePatientState {
+  error?: string;
+  deletedAt?: number;
+}
+
+/** Remove um paciente e seus convites/respostas associados. */
+export async function deletePatientAction(
+  _prev: DeletePatientState,
+  formData: FormData
+): Promise<DeletePatientState> {
+  const session = await getSession();
+  if (!session) return { error: "Sua sessão expirou. Entre novamente." };
+
+  const patientId = String(formData.get("patientId") ?? "");
+  if (!patientId) return { error: "Paciente inválido." };
+
+  try {
+    await db.delete(patients).where(eq(patients.id, patientId));
+    revalidatePath("/admin");
+    return { deletedAt: Date.now() };
+  } catch {
+    return { error: "Não foi possível excluir o paciente." };
+  }
 }
 
 /** Preenche/atualiza o CPF e a data de nascimento de um paciente já cadastrado. */
