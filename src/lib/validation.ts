@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { PATIENT_BRANCHES } from "./patient-branches";
 
 /** Remove tudo que não for dígito. */
 export function onlyDigits(value: string): string {
@@ -70,21 +71,41 @@ export const patientBaseSchema = z.object({
   cpf: optionalCPF,
   name: z.string().trim().min(2, "Informe o nome completo."),
   birthDate: optionalDate("Data de nascimento inválida."),
-  planStartDate: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/, "Data de início da vigência inválida."),
-  planEndDate: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/, "Data de fim da vigência inválida."),
+  branch: z.enum(PATIENT_BRANCHES),
+  planStartDate: optionalDate("Data de início da vigência inválida."),
+  planEndDate: optionalDate("Data de fim da vigência inválida."),
 });
 
-export const patientSchema = patientBaseSchema.refine(
-  (data) => data.planEndDate >= data.planStartDate,
-  {
-    message: "O fim da vigência deve ser igual ou posterior ao início.",
-    path: ["planEndDate"],
-  }
-);
+export const patientSchema = patientBaseSchema
+  .superRefine((data, ctx) => {
+    if (data.branch !== "acompanhamento") return;
+
+    if (!data.planStartDate) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Informe o início da vigência.",
+        path: ["planStartDate"],
+      });
+    }
+    if (!data.planEndDate) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Informe o fim da vigência.",
+        path: ["planEndDate"],
+      });
+    }
+    if (
+      data.planStartDate &&
+      data.planEndDate &&
+      data.planEndDate < data.planStartDate
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "O fim da vigência deve ser igual ou posterior ao início.",
+        path: ["planEndDate"],
+      });
+    }
+  });
 
 export const patientDetailsSchema = patientBaseSchema.pick({
   cpf: true,

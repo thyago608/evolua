@@ -1,8 +1,7 @@
 import Link from "next/link";
-import { count, desc } from "drizzle-orm";
+import { and, count, desc, eq, ilike } from "drizzle-orm";
 import { db } from "@/db";
 import { patients, invites, responses, forms } from "@/db/schema";
-import { eq } from "drizzle-orm";
 import { formatDateBR } from "@/lib/dates";
 import { buildSurveyUrl } from "@/lib/whatsapp";
 import { Button } from "@/components/ui/button";
@@ -25,6 +24,13 @@ import {
 import { UserPlus, AlertTriangle } from "lucide-react";
 import { PatientLinkDialog } from "./patients/patient-link-dialog";
 import { DeletePatientDialog } from "./patients/delete-patient-dialog";
+import { CopyLinkButton } from "./patients/[id]/link-actions";
+import { PatientSearchControls } from "./patient-search-controls";
+import {
+  PATIENT_BRANCHES,
+  PATIENT_BRANCH_LABEL,
+  type PatientBranch,
+} from "@/lib/patient-branches";
 
 export const dynamic = "force-dynamic";
 const PATIENTS_PER_PAGE = 10;
@@ -33,6 +39,7 @@ type PatientRow = {
   id: string;
   name: string;
   phone: string | null;
+  branch: PatientBranch;
   createdAt: Date;
   latestInviteStatus: string | null;
   latestDueAt: Date | null;
@@ -43,32 +50,49 @@ type PatientRow = {
   surveyUrl: string | null;
 };
 
-async function getDashboardData(requestedPage: number) {
+async function getDashboardData(
+  requestedPage: number,
+  branchFilter: PatientBranch | null,
+  searchQuery: string
+) {
   const now = new Date();
+  const patientFilter = and(
+    branchFilter ? eq(patients.branch, branchFilter) : undefined,
+    searchQuery ? ilike(patients.name, `%${escapeLike(searchQuery)}%`) : undefined
+  );
 
-  const [patientCountResult, allInvites, allResponses, activeForm] =
+  const patientCountQuery = db.select({ total: count() }).from(patients);
+  if (patientFilter) patientCountQuery.where(patientFilter);
+
+  const [patientCountResult, allInvites, allResponses, activeForms] =
     await Promise.all([
-      db.select({ total: count() }).from(patients),
+      patientCountQuery,
       db.select().from(invites).orderBy(desc(invites.createdAt)),
       db.select().from(responses),
-      db.select().from(forms).where(eq(forms.isActive, true)).limit(1),
+      db.select().from(forms).where(eq(forms.isActive, true)),
     ]);
 
   const totalPatients = patientCountResult[0]?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(totalPatients / PATIENTS_PER_PAGE));
   const currentPage = Math.min(Math.max(requestedPage, 1), totalPages);
-  const allPatients = await db
+  const patientQuery = db
     .select()
     .from(patients)
-    .orderBy(desc(patients.createdAt))
+    .orderBy(desc(patients.createdAt));
+  if (patientFilter) patientQuery.where(patientFilter);
+  const allPatients = await patientQuery
     .limit(PATIENTS_PER_PAGE)
     .offset((currentPage - 1) * PATIENTS_PER_PAGE);
 
-  const latestInviteByPatient = new Map<string, (typeof allInvites)[number]>();
+  const latestInviteByPatientBranch = new Map<
+    string,
+    (typeof allInvites)[number]
+  >();
   for (const inv of allInvites) {
     // allInvites já vem ordenado desc por createdAt
-    if (!latestInviteByPatient.has(inv.patientId)) {
-      latestInviteByPatient.set(inv.patientId, inv);
+    const key = `${inv.patientId}:${inv.branch}`;
+    if (!latestInviteByPatientBranch.has(key)) {
+      latestInviteByPatientBranch.set(key, inv);
     }
   }
 
@@ -82,7 +106,7 @@ async function getDashboardData(requestedPage: number) {
   }
 
   const rows: PatientRow[] = allPatients.map((p) => {
-    const inv = latestInviteByPatient.get(p.id) ?? null;
+    const inv = latestInviteByPatientBranch.get(`${p.id}:${p.branch}`) ?? null;
     const needsResend =
       !!inv &&
       inv.status === "completed" &&
@@ -100,6 +124,7 @@ async function getDashboardData(requestedPage: number) {
       id: p.id,
       name: p.name,
       phone: p.phone,
+      branch: p.branch,
       createdAt: p.createdAt,
       latestInviteStatus: inv?.status ?? null,
       latestDueAt: inv?.dueAt ? new Date(inv.dueAt) : null,
@@ -116,7 +141,9 @@ async function getDashboardData(requestedPage: number) {
     totalPatients,
     totalPages,
     currentPage,
-    hasActiveForm: activeForm.length > 0,
+    missingFormBranches: (["acompanhamento", "novo", "segmento"] as const).filter(
+      (branch) => !activeForms.some((form) => form.branch === branch)
+    ),
     totalUnseen: allResponses.filter((r) => !r.seen).length,
     needsResendCount: rows.filter((r) => r.needsResend).length,
   };
@@ -143,21 +170,38 @@ function StatusBadge({ row }: { row: PatientRow }) {
 export default async function DashboardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ page?: string | string[] }>;
+  searchParams: Promise<{
+    page?: string | string[];
+    branch?: string | string[];
+    q?: string | string[];
+  }>;
 }) {
   const params = await searchParams;
   const rawPage = Array.isArray(params.page) ? params.page[0] : params.page;
   const parsedPage = Number.parseInt(rawPage ?? "1", 10);
   const requestedPage = Number.isFinite(parsedPage) && parsedPage > 0 ? parsedPage : 1;
+  const rawBranch = Array.isArray(params.branch)
+    ? params.branch[0]
+    : params.branch;
+  const branchFilter = PATIENT_BRANCHES.includes(rawBranch as PatientBranch)
+    ? (rawBranch as PatientBranch)
+    : null;
+  const rawSearch = Array.isArray(params.q) ? params.q[0] : params.q;
+  const searchQuery = (rawSearch ?? "").trim().slice(0, 120);
   const {
     rows,
     totalPatients,
     totalPages,
     currentPage,
-    hasActiveForm,
+    missingFormBranches,
     totalUnseen,
     needsResendCount,
-  } = await getDashboardData(requestedPage);
+  } = await getDashboardData(requestedPage, branchFilter, searchQuery);
+
+  const pageHref = (page: number, branch = branchFilter) =>
+    `/admin?page=${page}${branch ? `&branch=${branch}` : ""}${
+      searchQuery ? `&q=${encodeURIComponent(searchQuery)}` : ""
+    }`;
 
   return (
     <div className="space-y-6">
@@ -176,16 +220,18 @@ export default async function DashboardPage({
         </Button>
       </div>
 
-      {!hasActiveForm && (
+      {missingFormBranches.length > 0 && (
         <Card className="border-amber-300 bg-amber-50">
           <CardContent className="flex items-center gap-3 py-4 text-amber-800">
             <AlertTriangle className="h-5 w-5" />
             <span>
-              Nenhum formulário ativo.{" "}
+              Falta um formulário ativo para: {" "}
               <Link href="/admin/forms" className="font-medium underline">
-                Ative um formulário
+                {missingFormBranches
+                  .map((branch) => PATIENT_BRANCH_LABEL[branch])
+                  .join(", ")}
               </Link>{" "}
-              para conseguir gerar links.
+              . Ative-o antes de gerar links.
             </span>
           </CardContent>
         </Card>
@@ -215,17 +261,24 @@ export default async function DashboardPage({
       <Card>
         <CardHeader>
           <CardTitle>Pacientes</CardTitle>
+          <PatientSearchControls
+            initialQuery={searchQuery}
+            initialBranch={branchFilter}
+          />
         </CardHeader>
         <CardContent>
           {rows.length === 0 ? (
             <p className="py-8 text-center text-muted-foreground">
-              Nenhum paciente ainda. Comece cadastrando um.
+              {searchQuery || branchFilter
+                ? "Nenhum paciente encontrado para os filtros selecionados."
+                : "Nenhum paciente ainda. Comece cadastrando um."}
             </p>
           ) : (
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>Paciente</TableHead>
+                  <TableHead>Ramo</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Próximo ciclo</TableHead>
                   <TableHead className="text-center">Respostas</TableHead>
@@ -242,6 +295,11 @@ export default async function DashboardPage({
                       >
                         {row.name}
                       </Link>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="secondary">
+                        {PATIENT_BRANCH_LABEL[row.branch]}
+                      </Badge>
                     </TableCell>
                     <TableCell>
                       <StatusBadge row={row} />
@@ -264,6 +322,7 @@ export default async function DashboardPage({
                           lastInviteCompleted={row.latestInviteStatus === "completed"}
                           surveyUrl={row.surveyUrl}
                         />
+                        {row.surveyUrl && <CopyLinkButton value={row.surveyUrl} />}
                         <DeletePatientDialog
                           patientId={row.id}
                           patientName={row.name}
@@ -284,7 +343,7 @@ export default async function DashboardPage({
             <div className="flex items-center gap-1">
               {currentPage > 1 ? (
                 <Button asChild variant="outline" size="sm">
-                  <Link href={`/admin?page=${currentPage - 1}`}>Anterior</Link>
+                  <Link href={pageHref(currentPage - 1)}>Anterior</Link>
                 </Button>
               ) : (
                 <Button variant="outline" size="sm" disabled>
@@ -300,13 +359,13 @@ export default async function DashboardPage({
                     size="sm"
                     disabled={page === currentPage}
                   >
-                    {page === currentPage ? <span>{page}</span> : <Link href={`/admin?page=${page}`}>{page}</Link>}
+                    {page === currentPage ? <span>{page}</span> : <Link href={pageHref(page)}>{page}</Link>}
                   </Button>
                 )
               )}
               {currentPage < totalPages ? (
                 <Button asChild variant="outline" size="sm">
-                  <Link href={`/admin?page=${currentPage + 1}`}>Próxima</Link>
+                  <Link href={pageHref(currentPage + 1)}>Próxima</Link>
                 </Button>
               ) : (
                 <Button variant="outline" size="sm" disabled>
@@ -319,4 +378,8 @@ export default async function DashboardPage({
       </Card>
     </div>
   );
+}
+
+function escapeLike(value: string) {
+  return value.replace(/[\\%_]/g, "\\$&");
 }

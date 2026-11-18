@@ -69,6 +69,7 @@ export async function submitSurveyAction(
   await db.insert(responses).values({
     inviteId: invite.id,
     patientId: invite.patientId,
+    branch: invite.branch,
     answers: answers as unknown as Record<string, unknown>,
   });
 

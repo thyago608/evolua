@@ -27,14 +27,27 @@ export const questionTypeEnum = pgEnum("question_type", [
   "boolean",
 ]);
 
+export const patientBranchEnum = pgEnum("patient_branch", [
+  "acompanhamento",
+  "novo",
+  "segmento",
+]);
+
+export const formBranchEnum = pgEnum("form_branch", [
+  "acompanhamento",
+  "novo",
+  "segmento",
+]);
+
 // ---- Pacientes ----
 export const patients = pgTable("patients", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
   birthDate: date("birth_date"), // opcional — pode ser preenchido depois
   cpf: text("cpf").unique(), // opcional — pode ser preenchido depois
-  planStartDate: date("plan_start_date").notNull(),
-  planEndDate: date("plan_end_date").notNull(),
+  branch: patientBranchEnum("branch").notNull().default("acompanhamento"),
+  planStartDate: date("plan_start_date"),
+  planEndDate: date("plan_end_date"),
   // Campos administrativos importados da base de acompanhamento. Ainda não
   // são exibidos na UI, mas ficam disponíveis para uma futura evolução.
   planName: text("plan_name"),
@@ -49,6 +62,7 @@ export const patients = pgTable("patients", {
 export const forms = pgTable("forms", {
   id: uuid("id").primaryKey().defaultRandom(),
   title: text("title").notNull(),
+  branch: formBranchEnum("branch").notNull().default("acompanhamento"),
   isActive: boolean("is_active").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
@@ -77,6 +91,8 @@ export const invites = pgTable("invites", {
   formId: uuid("form_id")
     .notNull()
     .references(() => forms.id),
+  // Mantém o ramo da geração, mesmo que o paciente mude de ramo depois.
+  branch: patientBranchEnum("branch").notNull().default("acompanhamento"),
   token: uuid("token").notNull().unique().defaultRandom(),
   status: inviteStatusEnum("status").notNull().default("pending"),
   dueAt: timestamp("due_at", { withTimezone: true }).notNull(),
@@ -96,6 +112,8 @@ export const responses = pgTable("responses", {
   patientId: uuid("patient_id")
     .notNull()
     .references(() => patients.id, { onDelete: "cascade" }),
+  // Snapshot para o histórico poder ser agrupado por ramo.
+  branch: patientBranchEnum("branch").notNull().default("acompanhamento"),
   // snapshot { questionId: valor }
   answers: jsonb("answers").$type<Record<string, unknown>>().notNull(),
   submittedAt: timestamp("submitted_at", { withTimezone: true })

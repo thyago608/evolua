@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   ArrowDown,
   ArrowUp,
+  CheckCircle2,
   GripVertical,
   Plus,
   Trash2,
@@ -24,6 +25,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  FORM_BRANCH_LABEL,
+  type FormBranch,
+} from "@/lib/patient-branches";
 
 export type QuestionType =
   | "text"
@@ -71,9 +76,14 @@ function defaultOptionsFor(
 }
 
 /** Representação "persistível" usada para detectar alterações não salvas. */
-function toSnapshot(title: string, questions: EditorQuestion[]) {
+function toSnapshot(
+  title: string,
+  branch: FormBranch,
+  questions: EditorQuestion[]
+) {
   return JSON.stringify({
     title,
+    branch,
     questions: questions.map((q) => ({
       type: q.type,
       label: q.label,
@@ -88,14 +98,18 @@ export function FormEditor({
   initialTitle,
   initialQuestions,
   isActive,
+  initialBranch,
 }: {
   formId: string;
   initialTitle: string;
   initialQuestions: EditorQuestion[];
   isActive: boolean;
+  initialBranch: FormBranch;
 }) {
   const router = useRouter();
   const [title, setTitle] = useState(initialTitle);
+  const [branch, setBranch] = useState<FormBranch>(initialBranch);
+  const [showSuccessToast, setShowSuccessToast] = useState(false);
   const [questions, setQuestions] = useState<EditorQuestion[]>(
     initialQuestions.length ? initialQuestions : []
   );
@@ -105,13 +119,18 @@ export function FormEditor({
   );
 
   // Linha de base usada para saber se há alterações não salvas.
-  const baselineRef = useRef(toSnapshot(initialTitle, initialQuestions));
-  const dirty = toSnapshot(title, questions) !== baselineRef.current;
+  const baselineRef = useRef(
+    toSnapshot(initialTitle, initialBranch, initialQuestions)
+  );
+  const dirty = toSnapshot(title, branch, questions) !== baselineRef.current;
 
   // Após salvar com sucesso, a tela atual passa a ser a nova linha de base.
   useEffect(() => {
     if (state.ok && state.savedAt) {
-      baselineRef.current = toSnapshot(title, questions);
+      baselineRef.current = toSnapshot(title, branch, questions);
+      setShowSuccessToast(true);
+      const timeout = window.setTimeout(() => setShowSuccessToast(false), 3500);
+      return () => window.clearTimeout(timeout);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.savedAt]);
@@ -205,6 +224,15 @@ export function FormEditor({
 
   return (
     <>
+      {showSuccessToast && (
+        <div
+          role="status"
+          className="fixed right-6 top-6 z-[100] flex items-center gap-2 rounded-lg border border-emerald-500/30 bg-background px-4 py-3 text-sm font-medium text-emerald-700 shadow-lg dark:text-emerald-400"
+        >
+          <CheckCircle2 className="h-5 w-5" />
+          Formulário salvo com sucesso.
+        </div>
+      )}
       <div>
         <Button
           type="button"
@@ -215,6 +243,9 @@ export function FormEditor({
           ← Voltar aos formulários
         </Button>
         <h1 className="text-2xl font-semibold">Editar formulário</h1>
+        <p className="text-sm text-muted-foreground">
+          Público: {FORM_BRANCH_LABEL[branch]}
+        </p>
         {isActive && (
           <p className="text-sm text-emerald-600">
             Este é o formulário ativo.
@@ -225,17 +256,39 @@ export function FormEditor({
       <form action={formAction} className="space-y-6">
         <input type="hidden" name="formId" value={formId} />
         <input type="hidden" name="questions" value={serialized} />
+        <input type="hidden" name="branch" value={branch} />
 
         <Card>
-          <CardContent className="space-y-2 py-4">
-            <Label htmlFor="title">Título do formulário</Label>
-            <Input
-              id="title"
-              name="title"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              className="max-w-md"
-            />
+          <CardContent className="grid gap-4 py-4 sm:grid-cols-[minmax(0,1fr)_16rem]">
+            <div className="space-y-2">
+              <Label htmlFor="title">Título do formulário</Label>
+              <Input
+                id="title"
+                name="title"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Ramo do formulário</Label>
+              <Select
+                value={branch}
+                onValueChange={(value) => setBranch(value as FormBranch)}
+              >
+                <SelectTrigger aria-label="Ramo do formulário">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {(Object.keys(FORM_BRANCH_LABEL) as FormBranch[]).map(
+                    (formBranch) => (
+                      <SelectItem key={formBranch} value={formBranch}>
+                        {FORM_BRANCH_LABEL[formBranch]}
+                      </SelectItem>
+                    )
+                  )}
+                </SelectContent>
+              </Select>
+            </div>
           </CardContent>
         </Card>
 
@@ -416,10 +469,6 @@ export function FormEditor({
         {state.error && (
           <p className="text-sm text-destructive">{state.error}</p>
         )}
-        {state.ok && !dirty && (
-          <p className="text-sm text-emerald-600">Formulário salvo.</p>
-        )}
-
         <div className="sticky bottom-4 flex items-center justify-end gap-3 rounded-lg bg-background/80 p-2 backdrop-blur">
           {dirty && (
             <Badge variant="warning">Alterações não salvas</Badge>

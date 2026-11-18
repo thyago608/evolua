@@ -1,14 +1,19 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { invites, forms } from "@/db/schema";
+import { invites, forms, patients } from "@/db/schema";
 import { nextDueDate } from "./dates";
+import {
+  formBranchForPatientBranch,
+  type PatientBranch,
+} from "./patient-branches";
 
-/** Busca o formulário ativo; lança erro se não houver. */
-export async function getActiveForm() {
+/** Busca o formulário ativo aplicável ao ramo informado. */
+export async function getActiveForm(branch: PatientBranch) {
+  const formBranch = formBranchForPatientBranch(branch);
   const [form] = await db
     .select()
     .from(forms)
-    .where(eq(forms.isActive, true))
+    .where(and(eq(forms.isActive, true), eq(forms.branch, formBranch)))
     .limit(1);
   return form ?? null;
 }
@@ -19,10 +24,18 @@ export async function getActiveForm() {
  * Retorna o convite criado.
  */
 export async function createInviteForPatient(patientId: string) {
-  const form = await getActiveForm();
+  const [patient] = await db
+    .select({ branch: patients.branch })
+    .from(patients)
+    .where(eq(patients.id, patientId))
+    .limit(1);
+
+  if (!patient) throw new Error("Paciente não encontrado.");
+
+  const form = await getActiveForm(patient.branch);
   if (!form) {
     throw new Error(
-      "Nenhum formulário ativo. Ative um formulário antes de gerar links."
+      "Nenhum formulário ativo para este ramo. Ative um formulário antes de gerar links."
     );
   }
 
@@ -42,6 +55,7 @@ export async function createInviteForPatient(patientId: string) {
     .values({
       patientId,
       formId: form.id,
+      branch: patient.branch,
       dueAt: nextDueDate(),
       status: "pending",
     })

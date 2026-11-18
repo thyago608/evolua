@@ -35,6 +35,32 @@ export function CopyField({ value }: { value: string }) {
   );
 }
 
+/** Copia um link sem precisar abrir o diálogo de detalhes. */
+export function CopyLinkButton({ value }: { value: string }) {
+  const [copied, setCopied] = useState(false);
+
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      title="Copiar link da pesquisa"
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(value);
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        } catch {
+          /* ignore */
+        }
+      }}
+    >
+      {copied ? <Check className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />}
+      {copied ? "Copiado" : "Copiar"}
+    </Button>
+  );
+}
+
 export function GenerateLinkButton({
   patientId,
   hasLink,

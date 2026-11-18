@@ -12,12 +12,20 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { PATIENT_BRANCH_LABEL, type PatientBranch } from "@/lib/patient-branches";
 
 export default function NewPatientPage() {
   const [state, formAction, pending] = useActionState<
@@ -26,6 +34,7 @@ export default function NewPatientPage() {
   >(createPatientAction, {});
 
   const [cpf, setCpf] = useState("");
+  const [branch, setBranch] = useState<PatientBranch>("acompanhamento");
   const cpfDigits = onlyDigits(cpf);
   const cpfValid = cpfDigits.length === 11 && isValidCPF(cpf);
   const cpfShowError = cpfDigits.length === 11 && !cpfValid;
@@ -48,8 +57,8 @@ export default function NewPatientPage() {
         <CardHeader>
           <CardTitle>Dados do paciente</CardTitle>
           <CardDescription>
-            Nome e vigência são obrigatórios. CPF e nascimento podem ser
-            preenchidos depois.
+            CPF e nascimento podem ser preenchidos depois. A vigência é
+            obrigatória apenas em Acompanhamento.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -65,6 +74,36 @@ export default function NewPatientPage() {
               {fe.name && (
                 <p className="text-sm text-destructive">{fe.name}</p>
               )}
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="branch">Ramo</Label>
+              <input type="hidden" name="branch" value={branch} />
+              <Select
+                value={branch}
+                onValueChange={(value) => setBranch(value as PatientBranch)}
+              >
+                <SelectTrigger id="branch">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {(Object.entries(PATIENT_BRANCH_LABEL) as [
+                    PatientBranch,
+                    string,
+                  ][]).map(([value, label]) => (
+                    <SelectItem key={value} value={value}>
+                      {label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-sm text-muted-foreground">
+                {branch === "novo"
+                  ? "Pacientes novos não precisam de vigência."
+                  : branch === "segmento"
+                    ? "Segmento é a etapa inicial, sem compromisso de vigência."
+                    : "Acompanhamento exige início e fim da vigência."}
+              </p>
             </div>
 
             <div className="space-y-2">
@@ -114,9 +153,10 @@ export default function NewPatientPage() {
               )}
             </div>
 
-            <div className="space-y-2">
-              <Label>Vigência do plano</Label>
-              <div className="grid gap-4 sm:grid-cols-2">
+            {branch === "acompanhamento" && (
+              <div className="space-y-2">
+                <Label>Vigência do plano</Label>
+                <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-1.5">
                   <Label
                     htmlFor="planStartDate"
@@ -128,7 +168,7 @@ export default function NewPatientPage() {
                     id="planStartDate"
                     name="planStartDate"
                     type="date"
-                    required
+                    required={branch === "acompanhamento"}
                   />
                   {fe.planStartDate && (
                     <p className="text-sm text-destructive">
@@ -147,7 +187,7 @@ export default function NewPatientPage() {
                     id="planEndDate"
                     name="planEndDate"
                     type="date"
-                    required
+                    required={branch === "acompanhamento"}
                   />
                   {fe.planEndDate && (
                     <p className="text-sm text-destructive">
@@ -155,8 +195,9 @@ export default function NewPatientPage() {
                     </p>
                   )}
                 </div>
+                </div>
               </div>
-            </div>
+            )}
 
             {state.error && (
               <p className="text-sm text-destructive">{state.error}</p>
