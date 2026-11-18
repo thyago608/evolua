@@ -2,12 +2,13 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { eq, ne, and } from "drizzle-orm";
+import { eq, ne, and, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { patients } from "@/db/schema";
+import { invites, patients } from "@/db/schema";
 import { patientSchema, patientDetailsSchema, onlyDigits } from "@/lib/validation";
 import { createInviteForPatient, markInviteSent } from "@/lib/invites";
 import { getSession } from "@/lib/auth";
+import type { PatientBranch } from "@/lib/patient-branches";
 
 export interface PatientFormState {
   error?: string;
@@ -22,6 +23,7 @@ export async function createPatientAction(
     cpf: String(formData.get("cpf") ?? ""),
     name: String(formData.get("name") ?? ""),
     birthDate: String(formData.get("birthDate") ?? ""),
+    branch: String(formData.get("branch") ?? "acompanhamento"),
     planStartDate: String(formData.get("planStartDate") ?? ""),
     planEndDate: String(formData.get("planEndDate") ?? ""),
   };
@@ -48,8 +50,15 @@ export async function createPatientAction(
         name: parsed.data.name,
         birthDate: parsed.data.birthDate || null,
         cpf,
-        planStartDate: parsed.data.planStartDate,
-        planEndDate: parsed.data.planEndDate,
+        branch: parsed.data.branch,
+        planStartDate:
+          parsed.data.branch === "acompanhamento"
+            ? parsed.data.planStartDate
+            : null,
+        planEndDate:
+          parsed.data.branch === "acompanhamento"
+            ? parsed.data.planEndDate
+            : null,
       })
       .returning({ id: patients.id });
     newId = created.id;
@@ -70,6 +79,12 @@ export async function createPatientAction(
 
 export interface PatientDetailsState {
   ok?: boolean;
+  error?: string;
+  fieldErrors?: Record<string, string>;
+  savedAt?: number;
+}
+
+export interface PatientBranchState {
   error?: string;
   fieldErrors?: Record<string, string>;
   savedAt?: number;
@@ -149,6 +164,69 @@ export async function updatePatientDetailsAction(
   revalidatePath(`/admin/patients/${patientId}`);
   revalidatePath("/admin");
   return { ok: true, savedAt: Date.now() };
+}
+
+/** Atualiza o ramo atual do paciente e a vigência quando necessária. */
+export async function updatePatientBranchAction(
+  _prev: PatientBranchState,
+  formData: FormData
+): Promise<PatientBranchState> {
+  const patientId = String(formData.get("patientId") ?? "");
+  const branch = String(formData.get("branch") ?? "") as PatientBranch;
+  const planStartDate = String(formData.get("planStartDate") ?? "");
+  const planEndDate = String(formData.get("planEndDate") ?? "");
+
+  if (!patientId) return { error: "Paciente inválido." };
+  if (!['acompanhamento', 'novo', 'segmento'].includes(branch)) {
+    return { error: "Ramo inválido." };
+  }
+
+  if (branch === "acompanhamento") {
+    const fieldErrors: Record<string, string> = {};
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(planStartDate)) {
+      fieldErrors.planStartDate = "Informe o início da vigência.";
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(planEndDate)) {
+      fieldErrors.planEndDate = "Informe o fim da vigência.";
+    } else if (planStartDate && planEndDate < planStartDate) {
+      fieldErrors.planEndDate = "O fim deve ser igual ou posterior ao início.";
+    }
+    if (Object.keys(fieldErrors).length) {
+      return { error: "Verifique a vigência.", fieldErrors };
+    }
+  }
+
+  const [currentPatient] = await db
+    .select({ branch: patients.branch })
+    .from(patients)
+    .where(eq(patients.id, patientId))
+    .limit(1);
+  if (!currentPatient) return { error: "Paciente não encontrado." };
+
+  if (currentPatient.branch !== branch) {
+    await db
+      .update(invites)
+      .set({ status: "expired" })
+      .where(
+        and(
+          eq(invites.patientId, patientId),
+          inArray(invites.status, ["pending", "sent"])
+        )
+      );
+  }
+
+  await db
+    .update(patients)
+    .set({
+      branch,
+      planStartDate: branch === "acompanhamento" ? planStartDate : null,
+      planEndDate: branch === "acompanhamento" ? planEndDate : null,
+    })
+    .where(eq(patients.id, patientId));
+
+  revalidatePath(`/admin/patients/${patientId}`);
+  revalidatePath("/admin");
+  return { savedAt: Date.now() };
 }
 
 /** Gera (ou regenera) o link de pesquisa para um paciente. */

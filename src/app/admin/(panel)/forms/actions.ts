@@ -2,9 +2,10 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { eq, ne } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 import { db } from "@/db";
 import { forms, formQuestions } from "@/db/schema";
+import type { FormBranch } from "@/lib/patient-branches";
 
 const QUESTION_TYPES = [
   "text",
@@ -25,10 +26,13 @@ interface IncomingQuestion {
 }
 
 export async function createFormAction(formData: FormData) {
-  const title = String(formData.get("title") ?? "").trim() || "Nova pesquisa";
+  const title = String(formData.get("title") ?? "").trim();
+  const branch = String(formData.get("branch") ?? "acompanhamento") as FormBranch;
+  if (!title) return;
+  if (!['acompanhamento', 'novo', 'segmento'].includes(branch)) return;
   const [created] = await db
     .insert(forms)
-    .values({ title })
+    .values({ title, branch })
     .returning({ id: forms.id });
   revalidatePath("/admin/forms");
   redirect(`/admin/forms/${created.id}`);
@@ -37,11 +41,18 @@ export async function createFormAction(formData: FormData) {
 export async function activateFormAction(formData: FormData) {
   const formId = String(formData.get("formId") ?? "");
   if (!formId) return;
-  // Desativa todos os outros e ativa este.
+  const [form] = await db
+    .select({ branch: forms.branch })
+    .from(forms)
+    .where(eq(forms.id, formId))
+    .limit(1);
+  if (!form) return;
+
+  // Cada público possui seu próprio formulário ativo.
   await db
     .update(forms)
     .set({ isActive: false })
-    .where(ne(forms.id, formId));
+    .where(and(eq(forms.branch, form.branch), ne(forms.id, formId)));
   await db.update(forms).set({ isActive: true }).where(eq(forms.id, formId));
   revalidatePath("/admin/forms");
   revalidatePath("/admin");
@@ -73,10 +84,14 @@ export async function saveFormAction(
 ): Promise<SaveFormState> {
   const formId = String(formData.get("formId") ?? "");
   const title = String(formData.get("title") ?? "").trim();
+  const branch = String(formData.get("branch") ?? "") as FormBranch;
   const rawQuestions = String(formData.get("questions") ?? "[]");
 
   if (!formId) return { error: "Formulário inválido." };
   if (!title) return { error: "Informe um título." };
+  if (!['acompanhamento', 'novo', 'segmento'].includes(branch)) {
+    return { error: "Ramo inválido." };
+  }
 
   let questions: IncomingQuestion[];
   try {
@@ -100,7 +115,23 @@ export async function saveFormAction(
     }
   }
 
-  await db.update(forms).set({ title }).where(eq(forms.id, formId));
+  const [currentForm] = await db
+    .select({ branch: forms.branch, isActive: forms.isActive })
+    .from(forms)
+    .where(eq(forms.id, formId))
+    .limit(1);
+  if (!currentForm) return { error: "Formulário inválido." };
+
+  // Um formulário ativo que muda de ramo continua ativo no novo ramo,
+  // desativando o anterior daquele mesmo ramo para preservar a regra.
+  if (currentForm.isActive && currentForm.branch !== branch) {
+    await db
+      .update(forms)
+      .set({ isActive: false })
+      .where(and(eq(forms.branch, branch), ne(forms.id, formId)));
+  }
+
+  await db.update(forms).set({ title, branch }).where(eq(forms.id, formId));
   await db.delete(formQuestions).where(eq(formQuestions.formId, formId));
 
   if (questions.length > 0) {

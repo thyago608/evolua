@@ -48,6 +48,7 @@ export default async function EditFormPage({
         initialTitle={form.title}
         initialQuestions={initial}
         isActive={form.isActive}
+        initialBranch={form.branch}
       />
     </div>
   );

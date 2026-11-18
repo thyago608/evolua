@@ -19,6 +19,12 @@ import {
 } from "@/components/ui/card";
 import { CopyField, GenerateLinkButton, MarkSentButton } from "./link-actions";
 import { PatientDetailsDialog } from "./patient-details-dialog";
+import { PatientBranchDialog } from "./patient-branch-dialog";
+import {
+  PATIENT_BRANCHES,
+  PATIENT_BRANCH_LABEL,
+  type PatientBranch,
+} from "@/lib/patient-branches";
 
 export const dynamic = "force-dynamic";
 
@@ -40,7 +46,9 @@ export default async function PatientDetailPage({
   const [latestInvite] = await db
     .select()
     .from(invites)
-    .where(eq(invites.patientId, id))
+    .where(
+      and(eq(invites.patientId, id), eq(invites.branch, patient.branch))
+    )
     .orderBy(desc(invites.createdAt))
     .limit(1);
 
@@ -66,6 +74,10 @@ export default async function PatientDetailPage({
       : null;
 
   const surveyUrl = activeLink ? buildSurveyUrl(activeLink.token) : null;
+  const historyByBranch = PATIENT_BRANCHES.map((branch) => ({
+    branch,
+    responses: history.filter((response) => response.branch === branch),
+  })).filter((group) => group.responses.length > 0);
 
   return (
     <div className="space-y-6">
@@ -73,7 +85,10 @@ export default async function PatientDetailPage({
         <Button asChild variant="link" className="px-0">
           <Link href="/admin">← Voltar ao painel</Link>
         </Button>
-        <h1 className="text-2xl font-semibold">{patient.name}</h1>
+        <div className="flex flex-wrap items-center gap-3">
+          <h1 className="text-2xl font-semibold">{patient.name}</h1>
+          <Badge>{PATIENT_BRANCH_LABEL[patient.branch]}</Badge>
+        </div>
       </div>
 
       <div className="grid gap-6 md:grid-cols-2">
@@ -83,6 +98,12 @@ export default async function PatientDetailPage({
             <CardTitle>Dados</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2 text-sm">
+            <div className="flex items-center justify-between gap-4">
+              <span className="text-muted-foreground">Ramo atual</span>
+              <Badge variant="secondary">
+                {PATIENT_BRANCH_LABEL[patient.branch]}
+              </Badge>
+            </div>
             <Row
               label="CPF"
               value={patient.cpf ? formatCPF(patient.cpf) : "Não informado"}
@@ -95,17 +116,27 @@ export default async function PatientDetailPage({
                   : "Não informado"
               }
             />
-            <Row
-              label="Vigência do plano"
-              value={`${formatDateBR(patient.planStartDate)} a ${formatDateBR(patient.planEndDate)}`}
-            />
+            {patient.branch === "acompanhamento" && (
+              <Row
+                label="Vigência do plano"
+                value={`${formatDateBR(patient.planStartDate)} a ${formatDateBR(patient.planEndDate)}`}
+              />
+            )}
             {patient.phone && <Row label="Telefone" value={patient.phone} />}
             <div className="pt-2">
-              <PatientDetailsDialog
-                patientId={patient.id}
-                currentCpf={patient.cpf}
-                currentBirthDate={patient.birthDate}
-              />
+              <div className="flex flex-wrap gap-2">
+                <PatientDetailsDialog
+                  patientId={patient.id}
+                  currentCpf={patient.cpf}
+                  currentBirthDate={patient.birthDate}
+                />
+                <PatientBranchDialog
+                  patientId={patient.id}
+                  currentBranch={patient.branch}
+                  currentPlanStartDate={patient.planStartDate}
+                  currentPlanEndDate={patient.planEndDate}
+                />
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -115,7 +146,8 @@ export default async function PatientDetailPage({
           <CardHeader>
             <CardTitle>Link da pesquisa</CardTitle>
             <CardDescription>
-              Copie o link e envie manualmente ao paciente.
+              Copie o link e envie manualmente ao paciente. Formulário do ramo{" "}
+              {PATIENT_BRANCH_LABEL[patient.branch]}.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -171,45 +203,62 @@ export default async function PatientDetailPage({
               Este paciente ainda não respondeu nenhuma pesquisa.
             </p>
           ) : (
-            history.map((r, idx) => {
-              const answers = (r.answers as unknown as StoredAnswer[]) ?? [];
-              const responseNumber = history.length - idx;
-              return (
-                <Card key={r.id} className="overflow-hidden shadow-sm">
-                  <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/40 px-4 py-3">
-                    <div className="flex items-center gap-3">
-                      <span className="flex size-7 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
-                        {responseNumber}
-                      </span>
-                      <div>
-                        <h3 className="text-sm font-semibold">
-                          Resposta {responseNumber}
-                        </h3>
-                        <p className="text-xs text-muted-foreground">
-                          Enviada em {formatDateTimeBR(r.submittedAt)}
-                        </p>
-                      </div>
-                    </div>
-                    {idx === 0 && <Badge variant="secondary">Mais recente</Badge>}
+            historyByBranch.map(({ branch, responses: branchResponses }) => (
+              <section key={branch} className="space-y-3">
+                <div className="flex items-center justify-between border-b pb-2">
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-medium">
+                      Respostas · {PATIENT_BRANCH_LABEL[branch]}
+                    </h3>
+                    <Badge variant="secondary">{branchResponses.length}</Badge>
                   </div>
-                  <CardContent className="p-4">
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      {answers.map((a, i) => (
-                        <div
-                          key={i}
-                          className="rounded-lg border bg-muted/30 p-3"
-                        >
-                          <p className="text-xs font-medium text-muted-foreground">
-                            {a.label}
-                          </p>
-                          <p className="text-sm">{renderAnswerValue(a)}</p>
+                </div>
+                {branchResponses.map((r, idx) => {
+                  const answers =
+                    (r.answers as unknown as StoredAnswer[]) ?? [];
+                  const responseNumber = branchResponses.length - idx;
+                  return (
+                    <Card key={r.id} className="overflow-hidden shadow-sm">
+                      <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/40 px-4 py-3">
+                        <div className="flex items-center gap-3">
+                          <span className="flex size-7 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
+                            {responseNumber}
+                          </span>
+                          <div>
+                            <h4 className="text-sm font-semibold">
+                              Resposta {responseNumber}
+                            </h4>
+                            <p className="text-xs text-muted-foreground">
+                              Enviada em {formatDateTimeBR(r.submittedAt)}
+                            </p>
+                          </div>
                         </div>
-                      ))}
-                    </div>
-                  </CardContent>
-                </Card>
-              );
-            })
+                        {idx === 0 && (
+                          <Badge variant="secondary">Mais recente</Badge>
+                        )}
+                      </div>
+                      <CardContent className="p-4">
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          {answers.map((a, i) => (
+                            <div
+                              key={i}
+                              className="rounded-lg border bg-muted/30 p-3"
+                            >
+                              <p className="text-xs font-medium text-muted-foreground">
+                                {a.label}
+                              </p>
+                              <p className="text-sm">
+                                {renderAnswerValue(a)}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </section>
+            ))
           )}
         </CardContent>
       </Card>
